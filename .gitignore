@@ -1,0 +1,49 @@
+# Generic
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+
+# Firmware / PlatformIO
+.pio/
+.vscode/
+.clang-format
+.gcc-flags.json
+*.bin
+*.elf
+*.hex
+
+# Python (Backend & Tests)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+*.zip
+backend/lambdas/*.zip
+
+# React Frontend (Dashboard)
+dashboard/node_modules/
+dashboard/dist/
+dashboard/dist-ssr/
+dashboard/npm-debug.log*
+dashboard/yarn-debug.log*
+dashboard/yarn-error.log*
+dashboard/.pnpm-debug.log*
+dashboard/.env.local
+dashboard/.env.*.local
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+terraform.tfvars
+override.tf
+override.tf.json
+*._override.tf
+*._override.tf.json
