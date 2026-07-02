@@ -1,5 +1,5 @@
 #include "audio_processor.h"
-#include <math.h>
+#include <cmath>
 
 AudioProcessor::AudioProcessor(float calibrationOffset) 
     : _calibrationOffset(calibrationOffset) {
@@ -8,7 +8,7 @@ AudioProcessor::AudioProcessor(float calibrationOffset)
 
 void AudioProcessor::init() {
     // Zero out biquad history states
-    for (int i = 0; i < STAGES; i++) {
+    for (int i = 0; i < NUM_STAGES; i++) {
         _states[i].x1 = 0.0f;
         _states[i].x2 = 0.0f;
         _states[i].y1 = 0.0f;
@@ -47,7 +47,7 @@ void AudioProcessor::setCalibrationOffset(float offset) {
 float AudioProcessor::filterSample(float sample) {
     float x = sample;
     
-    for (int i = 0; i < STAGES; i++) {
+    for (int i = 0; i < NUM_STAGES; i++) {
         // Direct Form I IIR filter difference equation
         float y = (_coeffs[i].b0 * x) + 
                   (_coeffs[i].b1 * _states[i].x1) + 
@@ -85,7 +85,7 @@ float AudioProcessor::processBlock(const int16_t* samples, size_t count) {
     }
 
     // Return the Root Mean Square (RMS) of this block
-    return (float)sqrt(sumSq / (double)count);
+    return (float)std::sqrt(sumSq / (double)count);
 }
 
 float AudioProcessor::convertToDb(float rms) {
@@ -96,7 +96,7 @@ float AudioProcessor::convertToDb(float rms) {
     
     // Convert amplitude to decibels (relative to full scale) + calibration offset
     // 20 * log10(rms) is negative. We add the calibration offset to get positive dBA.
-    float dbFS = 20.0f * log10f(rms);
+    float dbFS = 20.0f * (float)std::log10((double)rms);
     
     return dbFS + _calibrationOffset;
 }

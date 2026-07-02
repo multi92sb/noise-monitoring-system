@@ -33,9 +33,9 @@ private:
     float _calibrationOffset;
     
     // A-weighting filter biquads (3 stages cascaded)
-    static const int STAGES = 3;
-    BiquadCoeffs _coeffs[STAGES];
-    BiquadState _states[STAGES];
+#define NUM_STAGES 3
+    BiquadCoeffs _coeffs[NUM_STAGES];
+    BiquadState _states[NUM_STAGES];
 
     // Applies A-weighting filter to a single sample
     float filterSample(float sample);

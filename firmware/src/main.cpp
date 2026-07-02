@@ -4,6 +4,8 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <driver/i2s.h>
+#include <cstdlib>
+#include <cmath>
 #include "audio_processor.h"
 
 // Define to 1 to simulate sound input instead of reading hardware I2S mic
@@ -20,7 +22,7 @@
 #define CALIBRATION_OFFSET 120.0f 
 
 // Captive Portal DNS Port
-#define DNS_PORT 53
+#define CAPTIVE_DNS_PORT 53
 
 // Global Objects
 Preferences preferences;
@@ -100,26 +102,24 @@ void setup() {
 
 #if !SIMULATE_AUDIO
     // Configure ESP32 I2S driver for SPH0645LM4H microphone
-    i2s_config_t i2s_config = {
-        .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-        .sample_rate = SAMPLE_RATE,
-        .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT, // SPH0645 uses 32-bit slot width
-        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 4,
-        .dma_buf_len = BLOCK_SIZE,
-        .use_apll = false,
-        .tx_desc_auto_clear = false,
-        .fixed_mclk = 0
-    };
+    i2s_config_t i2s_config = {};
+    i2s_config.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX);
+    i2s_config.sample_rate = SAMPLE_RATE;
+    i2s_config.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT; // SPH0645 uses 32-bit slot width
+    i2s_config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+    i2s_config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+    i2s_config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+    i2s_config.dma_buf_count = 4;
+    i2s_config.dma_buf_len = BLOCK_SIZE;
+    i2s_config.use_apll = false;
+    i2s_config.tx_desc_auto_clear = false;
+    i2s_config.fixed_mclk = 0;
 
-    i2s_pin_config_t pin_config = {
-        .bck_io_num = PIN_I2S_SCK,
-        .ws_io_num = PIN_I2S_WS,
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num = PIN_I2S_SD
-    };
+    i2s_pin_config_t pin_config = {};
+    pin_config.bck_io_num = PIN_I2S_SCK;
+    pin_config.ws_io_num = PIN_I2S_WS;
+    pin_config.data_out_num = I2S_PIN_NO_CHANGE;
+    pin_config.data_in_num = PIN_I2S_SD;
 
     esp_err_t err = i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
     if (err != ESP_OK) {
@@ -203,7 +203,7 @@ void setupCaptivePortal() {
     WiFi.softAP(apName.c_str());
 
     // Redirect all DNS requests to the ESP32 portal page
-    dnsServer.start(DNS_PORT, "*", IPAddress(192, 168, 4, 1));
+    dnsServer.start(CAPTIVE_DNS_PORT, "*", IPAddress(192, 168, 4, 1));
 
     // Register WebServer routes
     server.on("/", HTTP_GET, handlePortalRoot);
@@ -287,7 +287,7 @@ void audioCaptureTask(void* parameter) {
     while (true) {
 #if !SIMULATE_AUDIO
         // Read raw 32-bit samples from I2S
-        esp_err_t result = i2s_read(I2S_PORT, &dmaBuffer, sizeof(dmaBuffer), &bytesRead, portMAX_DELAY);
+        esp_err_t result = i2s_read(I2S_PORT, dmaBuffer, sizeof(dmaBuffer), &bytesRead, portMAX_DELAY);
         if (result == ESP_OK && bytesRead > 0) {
             size_t sampleCount = bytesRead / sizeof(int32_t);
             for (size_t i = 0; i < sampleCount; i++) {
@@ -295,7 +295,7 @@ void audioCaptureTask(void* parameter) {
                 // Shift right by 16 to keep the top 16-bits as standard signed 16-bit PCM.
                 samples[i] = (int16_t)(dmaBuffer[i] >> 16);
             }
-            xQueueSend(audioQueue, &samples, portMAX_DELAY);
+            xQueueSend(audioQueue, samples, portMAX_DELAY);
         }
 #else
         // Simulate real-time audio block (16ms duration)
@@ -314,7 +314,7 @@ void audioCaptureTask(void* parameter) {
             samples[i] = (int16_t)(signal * 32767.0f);
         }
         
-        xQueueSend(audioQueue, &samples, portMAX_DELAY);
+        xQueueSend(audioQueue, samples, portMAX_DELAY);
         vTaskDelay(pdMS_TO_TICKS(16));
 #endif
     }
@@ -329,7 +329,7 @@ void audioProcessingTask(void* parameter) {
     const int blocksPerSecond = SAMPLE_RATE / BLOCK_SIZE; // 62.5 blocks/sec
 
     while (true) {
-        if (xQueueReceive(audioQueue, &blockSamples, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(audioQueue, blockSamples, portMAX_DELAY) == pdTRUE) {
             float rms = processor.processBlock(blockSamples, BLOCK_SIZE);
             float dba = processor.convertToDb(rms);
 

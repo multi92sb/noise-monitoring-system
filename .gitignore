@@ -47,3 +47,11 @@ override.tf
 override.tf.json
 *._override.tf
 *._override.tf.json
+
+# Sensitive Business & Backlog Documents
+docs/*BUSINESS*
+docs/*BUSINESS_PLAN*
+docs/*ROADMAP*
+docs/*BACKLOG*
+docs/*FUTURE_FEATURES*
+
