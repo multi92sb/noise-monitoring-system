@@ -3,13 +3,13 @@ import { api, Device, TelemetryData, AlertEvent } from './api';
 import { DeviceGrid } from './components/DeviceGrid';
 import { HistoryChart } from './components/HistoryChart';
 import { AlertSettings } from './components/AlertSettings';
-import { 
-  Building2, 
-  VolumeX, 
-  Calendar, 
-  Activity, 
-  HelpCircle, 
-  ChevronRight, 
+import {
+  Building2,
+  VolumeX,
+  Calendar,
+  Activity,
+  HelpCircle,
+  ChevronRight,
   BellRing,
   Clock
 } from 'lucide-react';
@@ -27,11 +27,11 @@ const App: React.FC = () => {
       try {
         const devList = await api.getDevices();
         setDevices(devList);
-        
+
         if (devList.length > 0) {
           setSelectedId(devList[0].id);
         }
-        
+
         const alertList = await api.getDeviceAlerts("");
         setAlerts(alertList);
       } catch (err) {
@@ -94,7 +94,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex min-h-screen bg-slate-900 text-slate-100">
-      
+
       {/* 1. LEFT SIDEBAR (Sticky Navigation) */}
       <aside className="hidden lg:flex flex-col w-64 bg-slate-950 border-r border-slate-800 p-6">
         {/* Brand Header */}
@@ -129,16 +129,16 @@ const App: React.FC = () => {
 
       {/* 2. MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col min-w-0">
-        
+
         {/* Main Header */}
         <header className="flex justify-between items-center px-6 py-4 bg-slate-950/40 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5 text-slate-400" />
             <h1 className="font-bold text-slate-200 text-sm tracking-wide">
-              Tenant: Brame Apartments
+              Tenant: Podinario Apartments
             </h1>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <span className="hidden sm:inline text-xs text-slate-400 font-semibold bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg">
               Sandbox Demo Mode
@@ -151,7 +151,7 @@ const App: React.FC = () => {
 
         {/* Dash Viewport */}
         <div className="flex-1 p-6 space-y-6 overflow-y-auto max-w-7xl w-full mx-auto">
-          
+
           {/* Header Title */}
           <div>
             <h1 className="text-2xl font-bold text-white tracking-tight">Active Fleet Dashboard</h1>
@@ -164,17 +164,17 @@ const App: React.FC = () => {
               <Activity className="h-4 w-4 text-sky-400" />
               <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Device Fleet Status</h2>
             </div>
-            <DeviceGrid 
-              devices={devices} 
-              selectedId={selectedId} 
-              onSelectDevice={(id) => setSelectedId(id)} 
+            <DeviceGrid
+              devices={devices}
+              selectedId={selectedId}
+              onSelectDevice={(id) => setSelectedId(id)}
             />
           </section>
 
           {/* 4. DETAIL LAYOUT (Charts & Settings) */}
           {selectedDevice && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
+
               {/* Telemetry Line Charts */}
               <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-xl p-6 flex flex-col justify-between">
                 <div>
@@ -197,7 +197,7 @@ const App: React.FC = () => {
                     </div>
                   )}
                 </div>
-                
+
                 {/* Chart Legends Info */}
                 <div className="flex items-center gap-4 text-xs text-slate-400 bg-slate-900/40 border border-slate-800/80 px-4 py-2.5 rounded-lg mt-4">
                   <div className="flex items-center gap-1.5">
