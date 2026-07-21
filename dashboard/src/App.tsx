@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api, Device, TelemetryData, AlertEvent } from './api';
+import { api, Device, TelemetryData, AlertEvent, DeviceUpdate, getEffectiveThreshold, isQuietHoursActive } from './api';
 import { DeviceGrid } from './components/DeviceGrid';
 import { HistoryChart } from './components/HistoryChart';
 import { AlertSettings } from './components/AlertSettings';
@@ -9,7 +9,6 @@ import {
   Calendar,
   Activity,
   HelpCircle,
-  ChevronRight,
   BellRing,
   Clock
 } from 'lucide-react';
@@ -72,14 +71,16 @@ const App: React.FC = () => {
     fetchHistory();
   }, [selectedId]);
 
-  const handleSaveConfig = async (id: string, name: string, dbThreshold: number, alertPhone: string) => {
-    await api.updateDevice(id, name, dbThreshold, alertPhone);
+  const handleSaveConfig = async (id: string, update: DeviceUpdate) => {
+    await api.updateDevice(id, update);
     // Refresh device list to update dashboard labels immediately
     const refreshed = await api.getDevices();
     setDevices(refreshed);
   };
 
   const selectedDevice = devices.find(d => d.id === selectedId);
+  const selectedEffectiveThreshold = selectedDevice ? getEffectiveThreshold(selectedDevice) : 0;
+  const selectedQuietHoursActive = selectedDevice ? isQuietHoursActive(selectedDevice) : false;
 
   if (isLoading) {
     return (
@@ -189,8 +190,25 @@ const App: React.FC = () => {
                       </div>
                     )}
                   </div>
+                  <div className="flex flex-wrap items-center gap-2 mb-5 text-xs font-semibold">
+                    <span className="bg-slate-900/70 border border-slate-700 px-2.5 py-1 rounded-lg text-slate-300">
+                      Active limit: {selectedEffectiveThreshold} dBA
+                    </span>
+                    <span className={`border px-2.5 py-1 rounded-lg ${
+                      selectedDevice.alert_enabled
+                        ? 'bg-green-500/10 border-green-500/20 text-green-400'
+                        : 'bg-slate-900/70 border-slate-700 text-slate-500'
+                    }`}>
+                      Alerts {selectedDevice.alert_enabled ? 'enabled' : 'disabled'}
+                    </span>
+                    {selectedQuietHoursActive && (
+                      <span className="bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-lg text-indigo-300">
+                        Quiet hours active
+                      </span>
+                    )}
+                  </div>
                   {telemetry ? (
-                    <HistoryChart telemetry={telemetry} threshold={selectedDevice.db_threshold} />
+                    <HistoryChart telemetry={telemetry} threshold={selectedEffectiveThreshold} />
                   ) : (
                     <div className="h-80 flex items-center justify-center text-slate-500 text-sm font-semibold">
                       Generating historical telemetry grid...

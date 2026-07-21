@@ -6,6 +6,8 @@
 #include <driver/i2s.h>
 #include <cstdlib>
 #include <cmath>
+#include <stdio.h>
+#include <time.h>
 #include "audio_processor.h"
 
 // Define to 1 to simulate sound input instead of reading hardware I2S mic
@@ -37,6 +39,21 @@ String wifiSSID;
 String wifiPassword;
 bool apModeActive = false;
 
+struct AlertConfig {
+    bool alertEnabled = true;
+    float dbThreshold = 80.0f;
+    int alertDurationMinutes = 10;
+    bool quietHoursEnabled = false;
+    char quietHoursStart[6] = "22:00";
+    char quietHoursEnd[6] = "07:00";
+    float quietHoursDbThreshold = 70.0f;
+    int timezoneOffsetMinutes = 0;
+};
+
+AlertConfig alertConfig;
+int sustainedViolationMinutes = 0;
+bool alertLatched = false;
+
 // Function Declarations
 void loadConfiguration();
 void saveConfiguration(const String& ssid, const String& password);
@@ -46,6 +63,11 @@ void handlePortalRoot();
 void handleNotFound();
 void audioCaptureTask(void* parameter);
 void audioProcessingTask(void* parameter);
+int parseTimeToMinutes(const char* timeText);
+bool isQuietHoursActiveNow();
+float getEffectiveThreshold(bool* quietHoursActive);
+void evaluateMinuteAlert(float avgDb, float peakDb);
+void publishAlertEvent(float peakDb, int durationMinutes, float thresholdConfig, float effectiveThreshold, bool quietHoursActive);
 
 void setup() {
     Serial.begin(115200);
@@ -84,6 +106,7 @@ void setup() {
 
         if (WiFi.status() == WL_CONNECTED) {
             Serial.printf("Connected! IP Address: %s\n", WiFi.localIP().toString().c_str());
+            configTime(0, 0, "pool.ntp.org", "time.nist.gov");
         } else {
             Serial.println("Wi-Fi Connection Failed. Launching Captive Portal...");
             setupCaptivePortal();
@@ -177,6 +200,21 @@ void loadConfiguration() {
     preferences.begin("noise-mvp", true); // Open NVS in read-only mode
     wifiSSID = preferences.getString("ssid", "");
     wifiPassword = preferences.getString("password", "");
+    alertConfig.alertEnabled = preferences.getBool("alert_enabled", true);
+    alertConfig.dbThreshold = preferences.getFloat("db_threshold", 80.0f);
+    alertConfig.alertDurationMinutes = preferences.getInt("alert_duration", 10);
+    alertConfig.quietHoursEnabled = preferences.getBool("quiet_enabled", false);
+    alertConfig.quietHoursDbThreshold = preferences.getFloat("quiet_thresh", 70.0f);
+    alertConfig.timezoneOffsetMinutes = preferences.getInt("tz_offset_min", 0);
+
+    String quietStart = preferences.getString("quiet_start", "22:00");
+    String quietEnd = preferences.getString("quiet_end", "07:00");
+    quietStart.toCharArray(alertConfig.quietHoursStart, sizeof(alertConfig.quietHoursStart));
+    quietEnd.toCharArray(alertConfig.quietHoursEnd, sizeof(alertConfig.quietHoursEnd));
+
+    if (alertConfig.alertDurationMinutes < 1 || alertConfig.alertDurationMinutes > 60) {
+        alertConfig.alertDurationMinutes = 10;
+    }
     preferences.end();
 }
 
@@ -325,6 +363,9 @@ void audioProcessingTask(void* parameter) {
     float maxDb = 0.0f;
     float sumDb = 0.0f;
     int secondCounter = 0;
+    float minutePeakDb = 0.0f;
+    float minuteSumDb = 0.0f;
+    int minuteCounter = 0;
     
     const int blocksPerSecond = SAMPLE_RATE / BLOCK_SIZE; // 62.5 blocks/sec
 
@@ -343,10 +384,141 @@ void audioProcessingTask(void* parameter) {
                 float avgDb = sumDb / (float)secondCounter;
                 Serial.printf("[SENTINEL] Live dBA - Average: %.1f dB | Peak: %.1f dB\n", avgDb, maxDb);
 
+                minuteSumDb += avgDb;
+                if (maxDb > minutePeakDb) {
+                    minutePeakDb = maxDb;
+                }
+                minuteCounter++;
+
+                if (minuteCounter >= 60) {
+                    float minuteAvgDb = minuteSumDb / (float)minuteCounter;
+                    Serial.printf("[SENTINEL] Minute dBA - Average: %.1f dB | Peak: %.1f dB\n", minuteAvgDb, minutePeakDb);
+                    evaluateMinuteAlert(minuteAvgDb, minutePeakDb);
+
+                    minutePeakDb = 0.0f;
+                    minuteSumDb = 0.0f;
+                    minuteCounter = 0;
+                }
+
                 maxDb = 0.0f;
                 sumDb = 0.0f;
                 secondCounter = 0;
             }
         }
     }
+}
+
+// ----------------------------------------------------
+// Alert Tuning State Machine
+// ----------------------------------------------------
+
+int parseTimeToMinutes(const char* timeText) {
+    if (timeText == NULL) {
+        return -1;
+    }
+
+    int hours = -1;
+    int minutes = -1;
+    if (sscanf(timeText, "%2d:%2d", &hours, &minutes) != 2) {
+        return -1;
+    }
+
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+        return -1;
+    }
+
+    return (hours * 60) + minutes;
+}
+
+bool isQuietHoursActiveNow() {
+    if (!alertConfig.quietHoursEnabled) {
+        return false;
+    }
+
+    time_t now = time(nullptr);
+    if (now < 1700000000) {
+        return false;
+    }
+
+    now += (time_t)alertConfig.timezoneOffsetMinutes * 60;
+    struct tm localTime;
+    gmtime_r(&now, &localTime);
+
+    int currentMinutes = (localTime.tm_hour * 60) + localTime.tm_min;
+    int startMinutes = parseTimeToMinutes(alertConfig.quietHoursStart);
+    int endMinutes = parseTimeToMinutes(alertConfig.quietHoursEnd);
+
+    if (startMinutes < 0 || endMinutes < 0 || startMinutes == endMinutes) {
+        return false;
+    }
+
+    if (startMinutes < endMinutes) {
+        return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    }
+
+    return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+}
+
+float getEffectiveThreshold(bool* quietHoursActive) {
+    bool quietActive = isQuietHoursActiveNow();
+    if (quietHoursActive != NULL) {
+        *quietHoursActive = quietActive;
+    }
+
+    return quietActive ? alertConfig.quietHoursDbThreshold : alertConfig.dbThreshold;
+}
+
+void evaluateMinuteAlert(float avgDb, float peakDb) {
+    if (!alertConfig.alertEnabled) {
+        sustainedViolationMinutes = 0;
+        alertLatched = false;
+        return;
+    }
+
+    bool quietHoursActive = false;
+    float effectiveThreshold = getEffectiveThreshold(&quietHoursActive);
+
+    if (avgDb > effectiveThreshold) {
+        sustainedViolationMinutes++;
+    } else {
+        sustainedViolationMinutes = 0;
+        alertLatched = false;
+        return;
+    }
+
+    Serial.printf(
+        "[SENTINEL] Alert window: %d/%d min above %.1f dBA\n",
+        sustainedViolationMinutes,
+        alertConfig.alertDurationMinutes,
+        effectiveThreshold
+    );
+
+    if (!alertLatched && sustainedViolationMinutes >= alertConfig.alertDurationMinutes) {
+        publishAlertEvent(
+            peakDb,
+            sustainedViolationMinutes,
+            alertConfig.dbThreshold,
+            effectiveThreshold,
+            quietHoursActive
+        );
+        alertLatched = true;
+    }
+}
+
+void publishAlertEvent(float peakDb, int durationMinutes, float thresholdConfig, float effectiveThreshold, bool quietHoursActive) {
+    time_t now = time(nullptr);
+    unsigned long timestamp = now >= 1700000000 ? (unsigned long)now : millis() / 1000;
+
+    String payload = "{";
+    payload += "\"timestamp\":" + String(timestamp);
+    payload += ",\"current_db\":" + String(peakDb, 1);
+    payload += ",\"duration_minutes\":" + String(durationMinutes);
+    payload += ",\"threshold_config\":" + String(thresholdConfig, 1);
+    payload += ",\"effective_threshold\":" + String(effectiveThreshold, 1);
+    payload += ",\"quiet_hours_active\":";
+    payload += quietHoursActive ? "true" : "false";
+    payload += "}";
+
+    String topic = "devices/" + deviceId + "/alert";
+    Serial.printf("[SENTINEL] Publish alert topic=%s payload=%s\n", topic.c_str(), payload.c_str());
 }

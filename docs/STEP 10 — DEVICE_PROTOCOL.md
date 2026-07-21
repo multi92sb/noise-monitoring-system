@@ -24,7 +24,9 @@ The communication between the ESP32-S3 sensor and AWS IoT Core utilizes MQTT (Me
     "timestamp": 1782849520,
     "current_db": 88.5,
     "duration_minutes": 10,
-    "threshold_config": 80.0
+    "threshold_config": 80.0,
+    "effective_threshold": 70.0,
+    "quiet_hours_active": true
   }
   ```
 
@@ -36,6 +38,12 @@ The communication between the ESP32-S3 sensor and AWS IoT Core utilizes MQTT (Me
     "state": {
       "desired": {
         "db_threshold": 80.0,
+        "alert_enabled": true,
+        "alert_duration_minutes": 10,
+        "quiet_hours_enabled": true,
+        "quiet_hours_start": "22:00",
+        "quiet_hours_end": "07:00",
+        "quiet_hours_db_threshold": 70.0,
         "calibration_offset": 3.2
       }
     }

@@ -3,11 +3,30 @@ export interface Device {
   id: string;
   name: string;
   status: 'online' | 'offline';
+  alert_enabled: boolean;
   db_threshold: number;
+  alert_duration_minutes: number;
+  quiet_hours_enabled: boolean;
+  quiet_hours_start: string;
+  quiet_hours_end: string;
+  quiet_hours_db_threshold: number;
   alert_phone: string;
   current_db: number;
   last_seen: string;
 }
+
+export type DeviceUpdate = Pick<
+  Device,
+  | 'name'
+  | 'alert_enabled'
+  | 'db_threshold'
+  | 'alert_duration_minutes'
+  | 'quiet_hours_enabled'
+  | 'quiet_hours_start'
+  | 'quiet_hours_end'
+  | 'quiet_hours_db_threshold'
+  | 'alert_phone'
+>;
 
 export interface TelemetryData {
   device_id: string;
@@ -31,13 +50,28 @@ const API_URL = import.meta.env.VITE_API_URL || "";
 const STORAGE_DEVICES = "noise_sentinel_devices";
 const STORAGE_ALERTS = "noise_sentinel_alerts";
 
+const DEFAULT_ALERT_CONFIG = {
+  alert_enabled: true,
+  alert_duration_minutes: 10,
+  quiet_hours_enabled: false,
+  quiet_hours_start: "22:00",
+  quiet_hours_end: "07:00",
+  quiet_hours_db_threshold: 70
+};
+
 // Initial Sandbox Mock Data
 const INITIAL_MOCK_DEVICES: Device[] = [
   {
     id: "sn-5d8f9",
     name: "Living Room (Main Node)",
     status: "online",
+    alert_enabled: true,
     db_threshold: 80,
+    alert_duration_minutes: 10,
+    quiet_hours_enabled: false,
+    quiet_hours_start: "22:00",
+    quiet_hours_end: "07:00",
+    quiet_hours_db_threshold: 70,
     alert_phone: "+33 6 1234 5678",
     current_db: 58.4,
     last_seen: "Just now"
@@ -46,7 +80,13 @@ const INITIAL_MOCK_DEVICES: Device[] = [
     id: "sn-3a2c4",
     name: "Balcony (Outdoors)",
     status: "online",
+    alert_enabled: true,
     db_threshold: 75,
+    alert_duration_minutes: 8,
+    quiet_hours_enabled: true,
+    quiet_hours_start: "22:00",
+    quiet_hours_end: "07:00",
+    quiet_hours_db_threshold: 65,
     alert_phone: "+33 6 1234 5678",
     current_db: 78.2, // currently exceeding threshold
     last_seen: "Just now"
@@ -55,7 +95,13 @@ const INITIAL_MOCK_DEVICES: Device[] = [
     id: "sn-9f12b",
     name: "Master Bedroom",
     status: "online",
+    alert_enabled: true,
     db_threshold: 70,
+    alert_duration_minutes: 12,
+    quiet_hours_enabled: true,
+    quiet_hours_start: "21:30",
+    quiet_hours_end: "07:30",
+    quiet_hours_db_threshold: 60,
     alert_phone: "",
     current_db: 38.1,
     last_seen: "Just now"
@@ -64,7 +110,13 @@ const INITIAL_MOCK_DEVICES: Device[] = [
     id: "sn-2b8e3",
     name: "Kitchen Sensor",
     status: "offline",
+    alert_enabled: false,
     db_threshold: 80,
+    alert_duration_minutes: 10,
+    quiet_hours_enabled: false,
+    quiet_hours_start: "22:00",
+    quiet_hours_end: "07:00",
+    quiet_hours_db_threshold: 70,
     alert_phone: "",
     current_db: 0,
     last_seen: "2 hours ago"
@@ -98,12 +150,40 @@ const getLocalStorageData = <T>(key: string, initial: T): T => {
   return JSON.parse(stored);
 };
 
+export const isQuietHoursActive = (device: Device, now = new Date()): boolean => {
+  if (!device.quiet_hours_enabled) return false;
+
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const startMinutes = timeToMinutes(device.quiet_hours_start);
+  const endMinutes = timeToMinutes(device.quiet_hours_end);
+
+  if (startMinutes === endMinutes) return false;
+  if (startMinutes < endMinutes) {
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+  }
+  return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+};
+
+export const getEffectiveThreshold = (device: Device, now = new Date()): number => {
+  return isQuietHoursActive(device, now) ? device.quiet_hours_db_threshold : device.db_threshold;
+};
+
+const normalizeDevice = (device: Device): Device => ({
+  ...DEFAULT_ALERT_CONFIG,
+  ...device
+});
+
+const timeToMinutes = (time: string): number => {
+  const [hours, minutes] = time.split(":").map(Number);
+  return (hours * 60) + minutes;
+};
+
 export const api = {
   // 1. Fetch all devices
   getDevices: async (): Promise<Device[]> => {
     if (!API_URL) {
       // Return local sandbox data
-      const devices = getLocalStorageData(STORAGE_DEVICES, INITIAL_MOCK_DEVICES);
+      const devices = getLocalStorageData<Device[]>(STORAGE_DEVICES, INITIAL_MOCK_DEVICES).map(normalizeDevice);
       // Simulate real-time fluctuating decibels for online devices
       return devices.map(d => {
         if (d.status === 'online') {
@@ -120,12 +200,12 @@ export const api = {
   },
 
   // 2. Update device configurations
-  updateDevice: async (id: string, name: string, dbThreshold: number, alertPhone: string): Promise<{ status: string }> => {
+  updateDevice: async (id: string, update: DeviceUpdate): Promise<{ status: string }> => {
     if (!API_URL) {
-      const devices = getLocalStorageData<Device[]>(STORAGE_DEVICES, INITIAL_MOCK_DEVICES);
+      const devices = getLocalStorageData<Device[]>(STORAGE_DEVICES, INITIAL_MOCK_DEVICES).map(normalizeDevice);
       const updated = devices.map(d => {
         if (d.id === id) {
-          return { ...d, name, db_threshold: dbThreshold, alert_phone: alertPhone };
+          return { ...d, ...update };
         }
         return d;
       });
@@ -135,7 +215,7 @@ export const api = {
     const res = await fetch(`${API_URL}/devices/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: jsonStringify({ name, db_threshold: dbThreshold, alert_phone: alertPhone })
+      body: jsonStringify(update)
     });
     return res.json();
   },

@@ -197,6 +197,18 @@ resource "aws_iot_topic_rule" "telemetry_ingest" {
   }
 }
 
+resource "aws_iot_topic_rule" "alert_ingest" {
+  name        = "noise_alert_ingest_rule"
+  description = "Routes sustained noise alert events to alert lambda"
+  enabled     = true
+  sql         = "SELECT *, topic(2) as device_id FROM 'devices/+/alert'"
+  sql_version = "2016-03-23"
+
+  lambda {
+    function_arn = aws_lambda_function.alert_handler.arn
+  }
+}
+
 # Grant IoT Core permission to invoke telemetry Lambda
 resource "aws_lambda_permission" "iot_telemetry_permission" {
   statement_id  = "AllowExecutionFromIoT"
@@ -204,6 +216,14 @@ resource "aws_lambda_permission" "iot_telemetry_permission" {
   function_name = aws_lambda_function.telemetry_handler.function_name
   principal     = "iot.amazonaws.com"
   source_arn    = "arn:aws:iot:${var.aws_region}:${data.aws_caller_identity.current.account_id}:rule/${aws_iot_topic_rule.telemetry_ingest.name}"
+}
+
+resource "aws_lambda_permission" "iot_alert_permission" {
+  statement_id  = "AllowAlertExecutionFromIoT"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.alert_handler.function_name
+  principal     = "iot.amazonaws.com"
+  source_arn    = "arn:aws:iot:${var.aws_region}:${data.aws_caller_identity.current.account_id}:rule/${aws_iot_topic_rule.alert_ingest.name}"
 }
 
 # ----------------------------------------------------

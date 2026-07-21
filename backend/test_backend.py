@@ -1,12 +1,19 @@
 import unittest
 import json
+import sys
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 # Mock boto3 before importing lambda handlers
-import sys
+class MockClientError(Exception):
+    def __init__(self, response=None):
+        self.response = response or {"Error": {"Code": "MockError", "Message": "mock"}}
+        super().__init__(self.response["Error"]["Message"])
+
 mock_boto3 = MagicMock()
 sys.modules['boto3'] = mock_boto3
 sys.modules['boto3.dynamodb.conditions'] = MagicMock()
+sys.modules['botocore.exceptions'] = MagicMock(ClientError=MockClientError)
 
 # Import the Lambda handlers
 from backend.lambdas.telemetry_handler import lambda_handler as telemetry_handler
@@ -52,6 +59,133 @@ class TestBackendLambdas(unittest.TestCase):
         body = json.loads(response["body"])
         self.assertEqual(len(body), 1)
         self.assertEqual(body[0]["name"], "Test Node")
+        self.assertTrue(body[0]["alert_enabled"])
+        self.assertEqual(body[0]["alert_duration_minutes"], 10)
+        self.assertEqual(body[0]["quiet_hours_start"], "22:00")
+
+    @patch('backend.lambdas.api_handler.table')
+    def test_api_handler_update_device_accepts_alert_tuning(self, mock_table):
+        event = {
+            "path": "/devices/sn-123",
+            "httpMethod": "PUT",
+            "pathParameters": {"id": "sn-123"},
+            "body": json.dumps({
+                "name": "Balcony Node",
+                "alert_enabled": True,
+                "db_threshold": 76,
+                "alert_duration_minutes": 8,
+                "quiet_hours_enabled": True,
+                "quiet_hours_start": "22:00",
+                "quiet_hours_end": "07:00",
+                "quiet_hours_db_threshold": 65,
+                "alert_phone": "+336123456"
+            }),
+            "requestContext": {
+                "authorizer": {
+                    "claims": {"custom:org_id": "default_org"}
+                }
+            }
+        }
+
+        response = api_handler(event, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        update_args = mock_table.update_item.call_args.kwargs
+        values = update_args["ExpressionAttributeValues"]
+        self.assertEqual(values[":duration"], 8)
+        self.assertEqual(values[":db_threshold"], Decimal("76.0"))
+        self.assertEqual(values[":quiet_threshold"], Decimal("65.0"))
+        self.assertTrue(values[":quiet_enabled"])
+
+    @patch('backend.lambdas.api_handler.table')
+    def test_api_handler_update_device_rejects_invalid_duration(self, mock_table):
+        event = {
+            "path": "/devices/sn-123",
+            "httpMethod": "PUT",
+            "pathParameters": {"id": "sn-123"},
+            "body": json.dumps({
+                "name": "Balcony Node",
+                "db_threshold": 76,
+                "alert_duration_minutes": 0,
+                "quiet_hours_start": "22:00",
+                "quiet_hours_end": "07:00",
+                "quiet_hours_db_threshold": 65
+            })
+        }
+
+        response = api_handler(event, None)
+
+        self.assertEqual(response["statusCode"], 400)
+        mock_table.update_item.assert_not_called()
+
+    @patch('backend.lambdas.api_handler.table')
+    def test_api_handler_update_device_rejects_invalid_threshold(self, mock_table):
+        event = {
+            "path": "/devices/sn-123",
+            "httpMethod": "PUT",
+            "pathParameters": {"id": "sn-123"},
+            "body": json.dumps({
+                "name": "Balcony Node",
+                "db_threshold": 10,
+                "alert_duration_minutes": 10,
+                "quiet_hours_start": "22:00",
+                "quiet_hours_end": "07:00",
+                "quiet_hours_db_threshold": 65
+            })
+        }
+
+        response = api_handler(event, None)
+
+        self.assertEqual(response["statusCode"], 400)
+        mock_table.update_item.assert_not_called()
+
+    @patch('backend.lambdas.api_handler.table')
+    def test_api_handler_update_device_rejects_invalid_quiet_hour_format(self, mock_table):
+        event = {
+            "path": "/devices/sn-123",
+            "httpMethod": "PUT",
+            "pathParameters": {"id": "sn-123"},
+            "body": json.dumps({
+                "name": "Balcony Node",
+                "db_threshold": 76,
+                "alert_duration_minutes": 10,
+                "quiet_hours_start": "25:00",
+                "quiet_hours_end": "07:00",
+                "quiet_hours_db_threshold": 65
+            })
+        }
+
+        response = api_handler(event, None)
+
+        self.assertEqual(response["statusCode"], 400)
+        mock_table.update_item.assert_not_called()
+
+    @patch('backend.lambdas.alert_handler.sns')
+    @patch('backend.lambdas.alert_handler.table')
+    def test_alert_handler_logs_effective_threshold_metadata(self, mock_table, mock_sns):
+        mock_table.query.return_value = {
+            "Items": [
+                {"name": "Balcony Node", "alert_phone": "+336123456"}
+            ]
+        }
+        event = {
+            "device_id": "sn-123",
+            "timestamp": 1782849520,
+            "current_db": 88.5,
+            "duration_minutes": 8,
+            "threshold_config": 76.0,
+            "effective_threshold": 65.0,
+            "quiet_hours_active": True
+        }
+
+        response = alert_handler(event, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        self.assertEqual(item["alert_duration_minutes"], 8)
+        self.assertEqual(item["effective_threshold"], Decimal("65.0"))
+        self.assertTrue(item["quiet_hours_active"])
+        mock_sns.publish.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

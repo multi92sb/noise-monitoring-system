@@ -2,6 +2,7 @@ import os
 import json
 import boto3
 from datetime import datetime
+from decimal import Decimal
 from boto3.dynamodb.conditions import Key
 
 # Initialize AWS clients
@@ -23,6 +24,8 @@ def lambda_handler(event, context):
     current_db = float(event.get('current_db', 0.0))
     duration_minutes = int(event.get('duration_minutes', 10))
     threshold_config = float(event.get('threshold_config', 80.0))
+    effective_threshold = float(event.get('effective_threshold', threshold_config))
+    quiet_hours_active = coerce_bool(event.get('quiet_hours_active', False))
 
     if not device_id or not timestamp:
         print("Error: Missing device_id or timestamp in event payload")
@@ -50,9 +53,12 @@ def lambda_handler(event, context):
                 'PK': event_pk,
                 'SK': event_sk,
                 'device_name': device_name,
-                'peak_db': current_db,
+                'peak_db': to_decimal(current_db),
                 'duration_minutes': duration_minutes,
-                'threshold_config': threshold_config,
+                'alert_duration_minutes': duration_minutes,
+                'threshold_config': to_decimal(threshold_config),
+                'effective_threshold': to_decimal(effective_threshold),
+                'quiet_hours_active': quiet_hours_active,
                 'timestamp': timestamp,
                 'status': 'active'
             }
@@ -65,9 +71,11 @@ def lambda_handler(event, context):
     if alert_phone:
         message = (
             f"ALERT: Noise Sentinel '{device_name}' detected sustained noise of "
-            f"{current_db:.1f} dBA (exceeding your {threshold_config:.1f} dBA threshold) "
+            f"{current_db:.1f} dBA (exceeding your {effective_threshold:.1f} dBA threshold) "
             f"for {duration_minutes} minutes!"
         )
+        if quiet_hours_active:
+            message += " Quiet hours policy was active."
         try:
             sns.publish(
                 PhoneNumber=alert_phone,
@@ -107,3 +115,13 @@ def lookup_device_config(device_id):
     except Exception as e:
         print(f"Error querying GSI DeviceLookupIndex: {str(e)}")
     return None
+
+def to_decimal(value):
+    return Decimal(str(round(float(value), 1)))
+
+def coerce_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes")
+    return bool(value)
