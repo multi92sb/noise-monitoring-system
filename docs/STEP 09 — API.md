@@ -17,7 +17,7 @@ The API is exposed via AWS API Gateway and handled by a Python Lambda function. 
   * **Response:** `[ { "id": "sn-94a2c", "name": "Living Room 1", "status": "online", "db_threshold": 80 } ]`
 * `PUT /api/devices/{id}`
   * **Description:** Update device friendly name or decibel threshold settings.
-  * **Payload:** `{ "name": "Balcony Node", "db_threshold": 85, "alert_phone": "+336123456" }`
+  * **Payload:** `{ "name": "Balcony Node", "alert_enabled": true, "db_threshold": 85, "alert_duration_minutes": 10, "quiet_hours_enabled": true, "quiet_hours_start": "22:00", "quiet_hours_end": "07:00", "quiet_hours_db_threshold": 70, "alert_phone": "+336123456" }`
 
 ### 3. Telemetry & Analytics
 * `GET /api/devices/{id}/history?date=YYYY-MM-DD`

@@ -1,6 +1,7 @@
 import os
 import json
 import boto3
+import re
 from decimal import Decimal
 from boto3.dynamodb.conditions import Key
 
@@ -8,6 +9,19 @@ from boto3.dynamodb.conditions import Key
 dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = os.environ.get('TABLE_NAME', 'noise_monitoring_mvp')
 table = dynamodb.Table(TABLE_NAME)
+
+DEFAULT_ALERT_CONFIG = {
+    "alert_enabled": True,
+    "db_threshold": 80,
+    "alert_duration_minutes": 10,
+    "quiet_hours_enabled": False,
+    "quiet_hours_start": "22:00",
+    "quiet_hours_end": "07:00",
+    "quiet_hours_db_threshold": 70,
+    "alert_phone": ""
+}
+
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 # Helper class to convert DynamoDB Decimal to Python float/int for JSON serialization
 class DecimalEncoder(json.JSONEncoder):
@@ -78,7 +92,7 @@ def get_devices(org_id):
     response = table.query(
         KeyConditionExpression=Key('PK').eq(f"ORG#{org_id}") & Key('SK').begins_with("DEVICE#")
     )
-    devices = response.get('Items', [])
+    devices = [normalize_device(item) for item in response.get('Items', [])]
     return build_response(200, devices)
 
 def update_device(org_id, device_id, body):
@@ -88,9 +102,12 @@ def update_device(org_id, device_id, body):
     if not device_id:
         return build_response(400, {"error": "Missing device ID"})
 
+    config_or_error = validate_device_config(body)
+    if "error" in config_or_error:
+        return build_response(400, {"error": config_or_error["error"]})
+
     name = body.get('name', 'Living Room Sensor')
-    db_threshold = body.get('db_threshold', 80.0)
-    alert_phone = body.get('alert_phone', '')
+    config = config_or_error
 
     pk = f"ORG#{org_id}"
     sk = f"DEVICE#{device_id}"
@@ -98,12 +115,24 @@ def update_device(org_id, device_id, body):
     # Use update_item to only set the properties updated by the tenant dashboard
     table.update_item(
         Key={'PK': pk, 'SK': sk},
-        UpdateExpression="SET #n = :name, db_threshold = :thresh, alert_phone = :phone",
+        UpdateExpression=(
+            "SET #n = :name, alert_enabled = :alert_enabled, "
+            "db_threshold = :db_threshold, alert_duration_minutes = :duration, "
+            "quiet_hours_enabled = :quiet_enabled, quiet_hours_start = :quiet_start, "
+            "quiet_hours_end = :quiet_end, quiet_hours_db_threshold = :quiet_threshold, "
+            "alert_phone = :phone"
+        ),
         ExpressionAttributeNames={'#n': 'name'},
         ExpressionAttributeValues={
             ':name': name,
-            ':thresh': Decimal(str(db_threshold)),
-            ':phone': alert_phone
+            ':alert_enabled': config['alert_enabled'],
+            ':db_threshold': Decimal(str(config['db_threshold'])),
+            ':duration': config['alert_duration_minutes'],
+            ':quiet_enabled': config['quiet_hours_enabled'],
+            ':quiet_start': config['quiet_hours_start'],
+            ':quiet_end': config['quiet_hours_end'],
+            ':quiet_threshold': Decimal(str(config['quiet_hours_db_threshold'])),
+            ':phone': config['alert_phone']
         }
     )
     
@@ -152,6 +181,74 @@ def get_device_alerts(device_id):
     )
     alerts = response.get('Items', [])
     return build_response(200, alerts)
+
+def normalize_device(item):
+    """
+    Adds alert-tuning defaults to older device records without requiring a table migration.
+    """
+    normalized = dict(item)
+    for key, value in DEFAULT_ALERT_CONFIG.items():
+        normalized.setdefault(key, value)
+
+    if "id" not in normalized and isinstance(normalized.get("SK"), str):
+        normalized["id"] = normalized["SK"].replace("DEVICE#", "", 1)
+
+    return normalized
+
+def validate_device_config(body):
+    """
+    Validates and coerces dashboard-owned alert settings.
+    """
+    try:
+        alert_enabled = coerce_bool(body.get('alert_enabled', DEFAULT_ALERT_CONFIG['alert_enabled']))
+        db_threshold = coerce_threshold(body.get('db_threshold', DEFAULT_ALERT_CONFIG['db_threshold']), 'db_threshold')
+        alert_duration_minutes = int(body.get('alert_duration_minutes', DEFAULT_ALERT_CONFIG['alert_duration_minutes']))
+        quiet_hours_enabled = coerce_bool(body.get('quiet_hours_enabled', DEFAULT_ALERT_CONFIG['quiet_hours_enabled']))
+        quiet_hours_start = str(body.get('quiet_hours_start', DEFAULT_ALERT_CONFIG['quiet_hours_start']))
+        quiet_hours_end = str(body.get('quiet_hours_end', DEFAULT_ALERT_CONFIG['quiet_hours_end']))
+        quiet_hours_db_threshold = coerce_threshold(
+            body.get('quiet_hours_db_threshold', DEFAULT_ALERT_CONFIG['quiet_hours_db_threshold']),
+            'quiet_hours_db_threshold'
+        )
+    except (TypeError, ValueError) as exc:
+        return {"error": str(exc)}
+
+    if alert_duration_minutes < 1 or alert_duration_minutes > 60:
+        return {"error": "alert_duration_minutes must be between 1 and 60"}
+
+    if not TIME_RE.match(quiet_hours_start):
+        return {"error": "quiet_hours_start must use HH:mm format"}
+
+    if not TIME_RE.match(quiet_hours_end):
+        return {"error": "quiet_hours_end must use HH:mm format"}
+
+    return {
+        "alert_enabled": alert_enabled,
+        "db_threshold": db_threshold,
+        "alert_duration_minutes": alert_duration_minutes,
+        "quiet_hours_enabled": quiet_hours_enabled,
+        "quiet_hours_start": quiet_hours_start,
+        "quiet_hours_end": quiet_hours_end,
+        "quiet_hours_db_threshold": quiet_hours_db_threshold,
+        "alert_phone": str(body.get('alert_phone', DEFAULT_ALERT_CONFIG['alert_phone']))
+    }
+
+def coerce_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.lower()
+        if lowered in ("true", "1", "yes"):
+            return True
+        if lowered in ("false", "0", "no"):
+            return False
+    raise ValueError("boolean alert settings must be true or false")
+
+def coerce_threshold(value, field_name):
+    threshold = float(value)
+    if threshold < 30 or threshold > 120:
+        raise ValueError(f"{field_name} must be between 30 and 120")
+    return threshold
 
 # ----------------------------------------------------
 # Utilities

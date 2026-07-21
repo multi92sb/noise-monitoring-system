@@ -1,6 +1,6 @@
 import React from 'react';
-import { Device } from '../api';
-import { Volume2, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { Device, getEffectiveThreshold } from '../api';
+import { Volume2, AlertTriangle } from 'lucide-react';
 
 interface DeviceGridProps {
   devices: Device[];
@@ -18,7 +18,8 @@ export const DeviceGrid: React.FC<DeviceGridProps> = ({
       {devices.map((device) => {
         const isSelected = device.id === selectedId;
         const isOnline = device.status === 'online';
-        const isExceeded = isOnline && device.current_db > device.db_threshold;
+        const effectiveThreshold = getEffectiveThreshold(device);
+        const isExceeded = isOnline && device.alert_enabled && device.current_db > effectiveThreshold;
 
         return (
           <button
@@ -59,7 +60,7 @@ export const DeviceGrid: React.FC<DeviceGridProps> = ({
                     {device.current_db} <span className="text-xs font-normal text-slate-400">dBA</span>
                   </p>
                   <p className="text-xs text-slate-400 mt-1">
-                    Threshold: {device.db_threshold} dB
+                    Limit: {effectiveThreshold} dB
                   </p>
                 </div>
                 {isExceeded && (
