@@ -187,5 +187,122 @@ class TestBackendLambdas(unittest.TestCase):
         self.assertTrue(item["quiet_hours_active"])
         mock_sns.publish.assert_called_once()
 
+    @patch('backend.lambdas.alert_handler.sns')
+    @patch('backend.lambdas.alert_handler.table')
+    def test_alert_handler_defaults_sound_class_to_unknown(self, mock_table, mock_sns):
+        """When the device payload omits sound_class, the stored Noise Event defaults to 'unknown'."""
+        mock_table.query.return_value = {
+            "Items": [
+                {"name": "Balcony Node", "alert_phone": "+336123456"}
+            ]
+        }
+        event = {
+            "device_id": "sn-123",
+            "timestamp": 1782849520,
+            "current_db": 88.5,
+            "duration_minutes": 8,
+            "threshold_config": 76.0,
+            "effective_threshold": 65.0,
+            "quiet_hours_active": True
+        }
+
+        response = alert_handler(event, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        self.assertEqual(item["sound_class"], "unknown")
+
+    @patch('backend.lambdas.alert_handler.sns')
+    @patch('backend.lambdas.alert_handler.table')
+    def test_alert_handler_preserves_sound_class_from_payload(self, mock_table, mock_sns):
+        """When the device payload includes a sound_class, it is stored on the Noise Event."""
+        mock_table.query.return_value = {
+            "Items": [
+                {"name": "Balcony Node", "alert_phone": "+336123456"}
+            ]
+        }
+        event = {
+            "device_id": "sn-123",
+            "timestamp": 1782849520,
+            "current_db": 88.5,
+            "duration_minutes": 8,
+            "threshold_config": 76.0,
+            "effective_threshold": 65.0,
+            "quiet_hours_active": True,
+            "sound_class": "crate_banging"
+        }
+
+        response = alert_handler(event, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        self.assertEqual(item["sound_class"], "crate_banging")
+
+    @patch('backend.lambdas.alert_handler.sns')
+    @patch('backend.lambdas.alert_handler.table')
+    def test_alert_handler_sms_includes_sound_class(self, mock_table, mock_sns):
+        """The SMS alert message includes the Sound Class label (US-10)."""
+        mock_table.query.return_value = {
+            "Items": [
+                {"name": "Balcony Node", "alert_phone": "+336123456"}
+            ]
+        }
+        event = {
+            "device_id": "sn-123",
+            "timestamp": 1782849520,
+            "current_db": 88.5,
+            "duration_minutes": 8,
+            "threshold_config": 76.0,
+            "effective_threshold": 65.0,
+            "quiet_hours_active": True,
+            "sound_class": "crate_banging"
+        }
+
+        alert_handler(event, None)
+
+        sms_message = mock_sns.publish.call_args.kwargs["Message"]
+        self.assertIn("crate_banging", sms_message)
+
+    @patch('backend.lambdas.api_handler.table')
+    def test_api_handler_get_alerts_returns_sound_class(self, mock_table):
+        """get_device_alerts returns items with sound_class, defaulting to 'unknown' for legacy records."""
+        mock_table.query.return_value = {
+            "Items": [
+                {
+                    "PK": "DEVICE#sn-123",
+                    "SK": "EVENT#1782849520",
+                    "peak_db": Decimal("88.5"),
+                    "duration_minutes": 8,
+                    "threshold_config": Decimal("76.0"),
+                    "sound_class": "talking"
+                },
+                {
+                    "PK": "DEVICE#sn-123",
+                    "SK": "EVENT#1782848000",
+                    "peak_db": Decimal("82.0"),
+                    "duration_minutes": 10,
+                    "threshold_config": Decimal("80.0")
+                }
+            ]
+        }
+
+        event = {
+            "path": "/devices/sn-123/alerts",
+            "httpMethod": "GET",
+            "pathParameters": {"id": "sn-123"},
+            "requestContext": {
+                "authorizer": {
+                    "claims": {"custom:org_id": "default_org"}
+                }
+            }
+        }
+
+        response = api_handler(event, None)
+        self.assertEqual(response["statusCode"], 200)
+        alerts = json.loads(response["body"])
+        self.assertEqual(len(alerts), 2)
+        self.assertEqual(alerts[0]["sound_class"], "talking")
+        self.assertEqual(alerts[1]["sound_class"], "unknown")
+
 if __name__ == "__main__":
     unittest.main()

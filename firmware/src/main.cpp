@@ -517,6 +517,7 @@ void publishAlertEvent(float peakDb, int durationMinutes, float thresholdConfig,
     payload += ",\"effective_threshold\":" + String(effectiveThreshold, 1);
     payload += ",\"quiet_hours_active\":";
     payload += quietHoursActive ? "true" : "false";
+    payload += ",\"sound_class\":\"unknown\"";
     payload += "}";
 
     String topic = "devices/" + deviceId + "/alert";

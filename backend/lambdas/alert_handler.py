@@ -26,6 +26,7 @@ def lambda_handler(event, context):
     threshold_config = float(event.get('threshold_config', 80.0))
     effective_threshold = float(event.get('effective_threshold', threshold_config))
     quiet_hours_active = coerce_bool(event.get('quiet_hours_active', False))
+    sound_class = event.get('sound_class', 'unknown')
 
     if not device_id or not timestamp:
         print("Error: Missing device_id or timestamp in event payload")
@@ -59,6 +60,7 @@ def lambda_handler(event, context):
                 'threshold_config': to_decimal(threshold_config),
                 'effective_threshold': to_decimal(effective_threshold),
                 'quiet_hours_active': quiet_hours_active,
+                'sound_class': sound_class,
                 'timestamp': timestamp,
                 'status': 'active'
             }
@@ -72,7 +74,7 @@ def lambda_handler(event, context):
         message = (
             f"ALERT: Noise Sentinel '{device_name}' detected sustained noise of "
             f"{current_db:.1f} dBA (exceeding your {effective_threshold:.1f} dBA threshold) "
-            f"for {duration_minutes} minutes!"
+            f"for {duration_minutes} minutes! Sound class: {sound_class}."
         )
         if quiet_hours_active:
             message += " Quiet hours policy was active."

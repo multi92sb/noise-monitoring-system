@@ -175,11 +175,11 @@ def get_device_alerts(device_id):
         return build_response(400, {"error": "Missing device ID"})
 
     pk = f"DEVICE#{device_id}"
-    
+
     response = table.query(
         KeyConditionExpression=Key('PK').eq(pk) & Key('SK').begins_with("EVENT#")
     )
-    alerts = response.get('Items', [])
+    alerts = [normalize_alert(item) for item in response.get('Items', [])]
     return build_response(200, alerts)
 
 def normalize_device(item):
@@ -193,6 +193,14 @@ def normalize_device(item):
     if "id" not in normalized and isinstance(normalized.get("SK"), str):
         normalized["id"] = normalized["SK"].replace("DEVICE#", "", 1)
 
+    return normalized
+
+def normalize_alert(item):
+    """
+    Adds sound_class default to older event records without requiring a table migration.
+    """
+    normalized = dict(item)
+    normalized.setdefault("sound_class", "unknown")
     return normalized
 
 def validate_device_config(body):
