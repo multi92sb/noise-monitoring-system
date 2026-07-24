@@ -259,6 +259,7 @@ const App: React.FC = () => {
                     <th className="py-3 px-4">Timestamp</th>
                     <th className="py-3 px-4">Event Code</th>
                     <th className="py-3 px-4">Target Device</th>
+                    <th className="py-3 px-4">Sound Class</th>
                     <th className="py-3 px-4">Configured Limit</th>
                     <th className="py-3 px-4 text-center">Duration</th>
                     <th className="py-3 px-4 text-right">Max dBA</th>
@@ -272,6 +273,7 @@ const App: React.FC = () => {
                         <td className="py-3.5 px-4 font-semibold text-slate-300">{alertDate}</td>
                         <td className="py-3.5 px-4 font-mono text-xs text-sky-400">{alert.id}</td>
                         <td className="py-3.5 px-4">Suite 302 - Balcony</td>
+                        <td className="py-3.5 px-4 text-slate-400">{alert.sound_class}</td>
                         <td className="py-3.5 px-4 text-slate-400">{alert.threshold_config} dB</td>
                         <td className="py-3.5 px-4 text-center font-semibold text-red-400">
                           <span className="inline-flex items-center gap-1.5">

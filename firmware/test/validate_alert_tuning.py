@@ -64,8 +64,41 @@ def test_quiet_hours_crossing_midnight():
     assert not is_quiet_hours_active("12:00", "22:00", "07:00")
 
 
+def build_alert_payload(peak_db, duration_minutes, threshold_config, effective_threshold, quiet_hours_active, sound_class="unknown"):
+    """Mirror of the firmware publishAlertEvent JSON construction."""
+    import json
+    return json.dumps({
+        "timestamp": 1782849520,
+        "current_db": round(peak_db, 1),
+        "duration_minutes": duration_minutes,
+        "threshold_config": round(threshold_config, 1),
+        "effective_threshold": round(effective_threshold, 1),
+        "quiet_hours_active": quiet_hours_active,
+        "sound_class": sound_class
+    })
+
+
+def test_alert_payload_includes_sound_class():
+    """The alert payload must include a sound_class field (defaults to 'unknown' until the classifier exists)."""
+    import json
+    payload = build_alert_payload(88.5, 8, 76.0, 65.0, True)
+    parsed = json.loads(payload)
+    assert "sound_class" in parsed, "sound_class missing from alert payload"
+    assert parsed["sound_class"] == "unknown", f"expected 'unknown', got '{parsed['sound_class']}'"
+
+
+def test_alert_payload_sound_class_is_overridable():
+    """When the classifier provides a label, it flows through the payload."""
+    import json
+    payload = build_alert_payload(88.5, 8, 76.0, 65.0, True, sound_class="crate_banging")
+    parsed = json.loads(payload)
+    assert parsed["sound_class"] == "crate_banging"
+
+
 if __name__ == "__main__":
     test_alert_triggers_once_after_configured_duration()
     test_alert_resets_after_recovery()
     test_quiet_hours_crossing_midnight()
+    test_alert_payload_includes_sound_class()
+    test_alert_payload_sound_class_is_overridable()
     print("SUCCESS: Alert tuning state machine checks passed successfully!")

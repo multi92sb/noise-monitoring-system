@@ -41,6 +41,7 @@ export interface AlertEvent {
   peak_db: number;
   duration_minutes: number;
   threshold_config: number;
+  sound_class: string;
 }
 
 // Config API URL
@@ -129,14 +130,16 @@ const INITIAL_MOCK_ALERTS: AlertEvent[] = [
     timestamp: Math.floor(Date.now() / 1000) - 3600 * 3, // 3 hours ago
     peak_db: 84.7,
     duration_minutes: 12,
-    threshold_config: 75
+    threshold_config: 75,
+    sound_class: "crate_banging"
   },
   {
     id: "evt-102",
     timestamp: Math.floor(Date.now() / 1000) - 3600 * 24 * 2, // 2 days ago
     peak_db: 89.1,
     duration_minutes: 25,
-    threshold_config: 80
+    threshold_config: 80,
+    sound_class: "unknown"
   }
 ];
 
